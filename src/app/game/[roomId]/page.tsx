@@ -32,119 +32,187 @@ export default function GamePage() {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
-  
+
   // Drawing related states
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [canDraw, setCanDraw] = useState(false);
   const [drawColor, setDrawColor] = useState("#000000");
   const [lineWidth, setLineWidth] = useState(5);
-  
+
   const params = useParams();
   const router = useRouter();
   const roomId = params.roomId as string;
-  
+
   // Set up WebSocket connection
   const socketRef = useRef<WebSocket | null>(null);
-  
-  useEffect(() => {
-    // Load user data from localStorage
-    const savedUserData = localStorage.getItem('drawAndGuessUser');
+
+
     
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && currentUser) {
+        socketRef.current.send(JSON.stringify({
+          type: 'leaveRoom',
+          userId: currentUser.id,
+          roomId: roomId,
+          username: currentUser.name,
+        }));
+      }
+  
+      // Optionally show confirmation dialog
+      event.preventDefault();
+      event.returnValue = '';
+    };
+  
+    // Page close or reload
+    window.addEventListener('beforeunload', handleBeforeUnload);
+  
+    return () => {
+      // Page navigation or component unmount
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+  
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && currentUser) {
+        socketRef.current.send(JSON.stringify({
+          type: 'leaveRoom',
+          userId: currentUser.id,
+          roomId: roomId,
+          username: currentUser.name,
+        }));
+      }
+  
+      // Safely close the socket
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+  
+      // Clean up localStorage if needed
+      localStorage.removeItem('drawAndGuessUser');
+    };
+  }, [currentUser, roomId]);
+  
+
+
+  useEffect(() => {
+    const savedUserData = localStorage.getItem('drawAndGuessUser');
+  
     if (savedUserData) {
       const userData = JSON.parse(savedUserData);
-      
-      // Check if the user is in the correct room
+  
       if (userData.roomId !== roomId) {
-        // Handle case where user tries to access wrong room
         setError("You're not part of this room. Please join from the homepage.");
         setIsLoading(false);
         return;
       }
-      
+  
       setCurrentUser({
         id: userData.id,
         name: userData.name,
-        isHost: userData.isHost
+        isHost: userData.isHost,
       });
-      
-      // Fetch room data
+  
       fetchRoomData();
-      
-      // Set up WebSocket connection
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.host}/api/socket?roomId=${roomId}&userId=${userData.id}`;
-      
-      socketRef.current = new WebSocket(wsUrl);
-      
-      socketRef.current.onopen = () => {
-        console.log('WebSocket connection established');
-        
-        // Add system message
-        addSystemMessage(`${userData.name} joined the room`);
-      };
-      
-      socketRef.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        
-        switch (data.type) {
-          case 'userJoined':
-            fetchRoomData(); // Refresh user list
-            addSystemMessage(`${data.user.name} joined the room`);
-            break;
-          case 'userLeft':
-            fetchRoomData(); // Refresh user list
-            addSystemMessage(`${data.user.name} left the room`);
-            break;
-          case 'chat':
-            addChatMessage(data.userId, data.username, data.text);
-            break;
-          case 'draw':
-            handleDrawEvent(data);
-            break;
-          case 'clearCanvas':
-            clearCanvas();
-            break;
-          case 'startRound':
-            handleStartRound(data);
-            break;
-          case 'endRound':
-            handleEndRound(data);
-            break;
-          case 'correctGuess':
-            handleCorrectGuess(data);
-            break;
-          default:
-            console.log('Unknown message type:', data.type);
+      setupWebSocket(userData);
+    } else {
+      // Handle direct URL access: Attempt to join the room or redirect with a message
+      const attemptJoin = async () => {
+        try {
+          // Assuming you have a way to generate or retrieve a user ID and name
+          const tempUserId = crypto.randomUUID(); // Temporary user ID
+          const tempUsername = `Guest_${Math.floor(Math.random() * 1000)}`; // Temporary name
+  
+          const response = await fetch(`/api/rooms/${roomId}/join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: { id: tempUserId, name: tempUsername } }),
+          });
+  
+          const data = await response.json();
+          if (response.ok) {
+            const userData = {
+              id: data.user.id,
+              name: data.user.name,
+              roomId: data.roomId,
+              isHost: false, // Adjust logic for host if needed
+            };
+            localStorage.setItem('drawAndGuessUser', JSON.stringify(userData));
+            setCurrentUser(userData);
+            fetchRoomData();
+            setupWebSocket(userData);
+          } else {
+            setError(data.message || 'Failed to join the room.');
+            setIsLoading(false);
+          }
+        } catch (err) {
+          setError('Failed to connect to the server.');
+          setIsLoading(false);
         }
       };
-      
+  
+      attemptJoin();
+    }
+  
+    function setupWebSocket(userData: any) {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/api/socket?roomId=${roomId}&userId=${userData.id}`;      socketRef.current = new WebSocket(wsUrl);
+  
+      socketRef.current.onopen = () => {
+        console.log('WebSocket connection established');
+        addSystemMessage(`${userData.name} joined the room`);
+      };
+  
+      socketRef.current.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        switch (data.type) {
+          case 'userJoined':
+            fetchRoomData();
+            addSystemMessage(`${data.user.name} joined the room`);
+            break;
+          // ... other cases remain the same
+        }
+      };
+  
       socketRef.current.onclose = () => {
         console.log('WebSocket connection closed');
       };
-      
-      return () => {
-        if (socketRef.current) {
-          socketRef.current.close();
-        }
-      };
-    } else {
-      // No user data, redirect to home
-      router.push('/');
     }
-  }, [roomId, router]);
   
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+    };
+  }, [roomId, router]);
+
+
+
+
   const fetchRoomData = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/rooms/${roomId}`);
-      
+      const response = await fetch(`/api/rooms/${roomId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
       if (response.ok) {
-        const roomData = await response.json();
-        setRoom(roomData);
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const roomData = await response.json();
+          setRoom(roomData);
+        } else {
+          console.error('Response is not JSON:', await response.text());
+          setError("Failed to parse room data (not JSON)");
+        }
       } else {
-        const error = await response.json();
-        setError(error.message || "Failed to fetch room data");
+        try {
+          const errorData = await response.json();
+          setError(errorData.message || `Failed to fetch room data: Status1 ${response.status}`);
+        } catch (e) {
+          setError(`Failed to fetch room data: Status2 ${response.status}`);
+        }
       }
     } catch (error) {
       console.error("Error fetching room data:", error);
@@ -153,7 +221,7 @@ export default function GamePage() {
       setIsLoading(false);
     }
   };
-  
+
   const addSystemMessage = (text: string) => {
     setMessages(prev => [
       ...prev,
@@ -167,7 +235,7 @@ export default function GamePage() {
       }
     ]);
   };
-  
+
   const addChatMessage = (userId: string, username: string, text: string) => {
     setMessages(prev => [
       ...prev,
@@ -181,32 +249,32 @@ export default function GamePage() {
       }
     ]);
   };
-  
+
   const sendMessage = () => {
     if (!messageInput.trim() || !currentUser || !socketRef.current) return;
-    
+
     socketRef.current.send(JSON.stringify({
       type: 'chat',
       userId: currentUser.id,
       username: currentUser.name,
       text: messageInput
     }));
-    
+
     setMessageInput("");
   };
-  
+
   // Drawing functions
   const handleDrawStart = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!canDraw || !canvasRef.current) return;
-    
+
     setIsDrawing(true);
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     const rect = canvas.getBoundingClientRect();
     let x, y;
-    
+
     if ('touches' in e) {
       // Touch event
       x = e.touches[0].clientX - rect.left;
@@ -216,10 +284,10 @@ export default function GamePage() {
       x = e.clientX - rect.left;
       y = e.clientY - rect.top;
     }
-    
+
     ctx.beginPath();
     ctx.moveTo(x, y);
-    
+
     // Send draw start event to server
     if (socketRef.current) {
       socketRef.current.send(JSON.stringify({
@@ -232,17 +300,17 @@ export default function GamePage() {
       }));
     }
   };
-  
+
   const handleDrawMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !canDraw || !canvasRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     const rect = canvas.getBoundingClientRect();
     let x, y;
-    
+
     if ('touches' in e) {
       // Touch event
       x = e.touches[0].clientX - rect.left;
@@ -252,10 +320,10 @@ export default function GamePage() {
       x = e.clientX - rect.left;
       y = e.clientY - rect.top;
     }
-    
+
     ctx.lineTo(x, y);
     ctx.stroke();
-    
+
     // Send draw move event to server
     if (socketRef.current) {
       socketRef.current.send(JSON.stringify({
@@ -268,12 +336,12 @@ export default function GamePage() {
       }));
     }
   };
-  
+
   const handleDrawEnd = () => {
     if (!isDrawing || !canDraw) return;
-    
+
     setIsDrawing(false);
-    
+
     // Send draw end event to server
     if (socketRef.current) {
       socketRef.current.send(JSON.stringify({
@@ -282,14 +350,14 @@ export default function GamePage() {
       }));
     }
   };
-  
+
   const handleDrawEvent = (data: any) => {
     if (!canvasRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     switch (data.action) {
       case 'start':
         ctx.beginPath();
@@ -310,20 +378,20 @@ export default function GamePage() {
         console.log('Unknown draw action:', data.action);
     }
   };
-  
+
   const clearCanvas = () => {
     if (!canvasRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
   const handleClearCanvas = () => {
     clearCanvas();
-    
+
     // Send clear canvas event to server
     if (socketRef.current) {
       socketRef.current.send(JSON.stringify({
@@ -331,14 +399,14 @@ export default function GamePage() {
       }));
     }
   };
-  
+
   const handleStartRound = (data: { drawerId: string, word?: string }) => {
     // Reset canvas
     clearCanvas();
-    
+
     // Set drawing permissions
     setCanDraw(currentUser?.id === data.drawerId);
-    
+
     // Add system message
     if (currentUser?.id === data.drawerId) {
       addSystemMessage(`It's your turn to draw! Your word is: ${data.word}`);
@@ -347,11 +415,11 @@ export default function GamePage() {
       addSystemMessage(`${drawer?.name || 'Someone'} is drawing now. Try to guess the word!`);
     }
   };
-  
+
   const handleEndRound = (data: { word: string, winnerId?: string }) => {
     // Disable drawing for everyone
     setCanDraw(false);
-    
+
     // Add system message
     if (data.winnerId) {
       const winner = room?.users.find(user => user.id === data.winnerId);
@@ -360,15 +428,15 @@ export default function GamePage() {
       addSystemMessage(`Round ended! Nobody guessed the word. The word was: ${data.word}`);
     }
   };
-  
+
   const handleCorrectGuess = (data: { userId: string, username: string }) => {
     // Add system message
     addSystemMessage(`${data.username} guessed the word correctly!`);
   };
-  
+
   const startGame = () => {
     if (!currentUser?.isHost || !socketRef.current) return;
-    
+
     socketRef.current.send(JSON.stringify({
       type: 'startGame'
     }));
@@ -378,26 +446,26 @@ export default function GamePage() {
   useEffect(() => {
     const handleResize = () => {
       if (!canvasRef.current) return;
-      
+
       const canvas = canvasRef.current;
       const parentDiv = canvas.parentElement;
-      
+
       if (parentDiv) {
         // Set canvas size to parent div size while maintaining aspect ratio
         const parentWidth = parentDiv.clientWidth;
         const parentHeight = parentDiv.clientHeight;
-        
+
         canvas.width = parentWidth;
         canvas.height = parentHeight;
       }
     };
-    
+
     // Initial sizing
     handleResize();
-    
+
     // Add event listener
     window.addEventListener('resize', handleResize);
-    
+
     // Clean up
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -407,10 +475,10 @@ export default function GamePage() {
   // Initialize canvas context on first render
   useEffect(() => {
     if (!canvasRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    
+
     if (ctx) {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -421,7 +489,7 @@ export default function GamePage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex bg-white items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
           <p className="mt-4">Loading game...</p>
@@ -432,11 +500,11 @@ export default function GamePage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex bg-white items-center justify-center min-h-screen">
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md max-w-md">
           <h2 className="font-bold text-lg mb-2">Error</h2>
           <p>{error}</p>
-          <button 
+          <button
             className="mt-4 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
             onClick={() => router.push('/')}
           >
@@ -447,6 +515,31 @@ export default function GamePage() {
     );
   }
 
+  // Handle user leaving the room
+  const leaveRoom = () => {
+    if (socketRef.current && currentUser) {
+      // Send leave message through websocket
+      socketRef.current.send(JSON.stringify({
+        type: 'leaveRoom',
+        userId: currentUser.id,
+        roomId: roomId,
+        username: currentUser.name // Include username for notification purposes
+      }));
+
+      // Close the websocket connection cleanly
+      socketRef.current.close();
+      socketRef.current = null;
+
+      // Clear user data from localStorage
+      localStorage.removeItem('drawAndGuessUser');
+    }
+
+    // Navigate to home page
+    router.push('/');
+  };
+
+
+
   return (
     <div className="flex text-black flex-col h-screen bg-gray-100">
       {/* Game header */}
@@ -455,23 +548,23 @@ export default function GamePage() {
           <h1 className="text-xl font-bold">Draw & Guess: Room {roomId}</h1>
           <div className="flex space-x-2">
             {currentUser?.isHost && (
-              <button 
+              <button
                 className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
                 onClick={startGame}
               >
                 Start Game
               </button>
             )}
-            <button 
+            <button
               className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
-              onClick={() => router.push('/')}
+              onClick={leaveRoom}
             >
               Leave Room
             </button>
           </div>
         </div>
       </header>
-      
+
       {/* Main game area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar - User list */}
@@ -497,7 +590,7 @@ export default function GamePage() {
             ))}
           </ul>
         </div>
-        
+
         {/* Center - Drawing area */}
         <div className="w-3/5 flex flex-col bg-gray-50 p-4">
           <div className="flex-1 bg-white border border-gray-300 rounded-lg overflow-hidden relative">
@@ -513,7 +606,7 @@ export default function GamePage() {
               onTouchEnd={handleDrawEnd}
             />
           </div>
-          
+
           {/* Drawing controls */}
           {canDraw && (
             <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg">
@@ -528,7 +621,7 @@ export default function GamePage() {
                     className="w-10 h-10 rounded cursor-pointer"
                   />
                 </div>
-                
+
                 <div className="flex-1">
                   <label htmlFor="line-width" className="block text-sm font-medium text-gray-700 mb-1">Line Width: {lineWidth}px</label>
                   <input
@@ -541,7 +634,7 @@ export default function GamePage() {
                     className="w-full"
                   />
                 </div>
-                
+
                 <button
                   onClick={handleClearCanvas}
                   className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
@@ -552,7 +645,7 @@ export default function GamePage() {
             </div>
           )}
         </div>
-        
+
         {/* Right sidebar - Chat area */}
         <div className="w-1/5 bg-white shadow-md flex flex-col">
           <div className="p-4 border-b">
@@ -561,7 +654,7 @@ export default function GamePage() {
               <h2 className="font-bold">Chat</h2>
             </div>
           </div>
-          
+
           {/* Messages list */}
           <div className="flex-1 overflow-y-auto p-4">
             {messages.map(message => (
@@ -575,7 +668,7 @@ export default function GamePage() {
               </div>
             ))}
           </div>
-          
+
           {/* Message input */}
           <div className="p-4 border-t">
             <div className="flex">

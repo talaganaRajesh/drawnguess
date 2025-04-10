@@ -14,7 +14,7 @@ const Navbar = () => {
 
         {/* Right Side: GitHub Button */}
         <a
-          href="https://github.com/talaganaRajesh"
+          href="https://github.com/talaganaRajesh/drawnguess"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium px-4 py-2 rounded-lg transition duration-200"

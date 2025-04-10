@@ -1,30 +1,65 @@
-// app/api/rooms/[roomId]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { Redis } from '@upstash/redis';
+import { NextRequest, NextResponse } from "next/server";
+import { RoomService } from "@/services/roomService";
 
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || '',
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
-});
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const roomId = url.pathname.split("/").pop(); // extract roomId from the path
 
-export async function GET(
-  request: NextRequest,
+  console.log("🎯 GET called for room:", roomId);
+
+  try {
+    let room = await RoomService.getRoom(roomId!);
+
+    if (!room) {
+      const hostUser = {
+        id: "test-host-id",
+        name: "Host",
+        isHost: true,
+      };
+
+      console.log("🛠️ Room not found. Creating new room...");
+      console.log("Creating room with roomId:", roomId, "and hostUser:", hostUser);
+
+      try {
+        room = await RoomService.createRoom(roomId!, hostUser);
+      } catch (error) {
+        console.error("Error creating room:", error);
+        return NextResponse.json({ message: "Failed to create room" }, { status: 500 });
+      }
+
+      console.log("✅ Room created successfully:", room);
+    }
+
+    return NextResponse.json(room);
+  } catch (error) {
+    console.error("❌ Error in GET handler:", error);
+    return NextResponse.json({ message: "Failed to retrieve or create room" }, { status: 500 });
+  }
+}
+
+// DELETE - Remove user from room
+export async function DELETE(
+  request: Request,
   { params }: { params: { roomId: string } }
 ) {
+  const { roomId } = params;
+  const body = await request.json();
+  const userId = body.userId;
+
+  if (!userId) {
+    return NextResponse.json({ message: 'User ID is required' }, { status: 400 });
+  }
+
   try {
-    const roomId = params.roomId;
-    
-    // Get room data from Redis
-    const roomData = await redis.get(`room:${roomId}`);
-    
-    if (!roomData) {
-      return NextResponse.json({ message: 'Room not found' }, { status: 404 });
+    const room = await RoomService.removeUserFromRoom(roomId, userId);
+
+    if (!room) {
+      return NextResponse.json({ message: 'Room deleted successfully' }, { status: 200 });
     }
-    
-    return NextResponse.json(roomData);
+
+    return NextResponse.json(room, { status: 200 });
   } catch (error) {
-    console.error('Error fetching room:', error);
-    return NextResponse.json({ message: 'Failed to fetch room data' }, { status: 500 });
+    console.error('Error removing user from room:', error);
+    return NextResponse.json({ message: 'Failed to remove user from room' }, { status: 500 });
   }
 }

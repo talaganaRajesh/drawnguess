@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 
 
 export const metadata: Metadata = {
-  title: "draw n guess",
-  description: "A multiplayer drawing and guessing game developed by talagana rajesh",
+  title: "Draw N Guess - by Talagana Rajesh",
+  description: "A multiplayer drawing and guessing game developed by Talagana Rajesh , the developer of Get Material NIST Notes",
 };
 
 export default function RootLayout({

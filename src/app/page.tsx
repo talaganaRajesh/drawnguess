@@ -156,6 +156,11 @@ export default function HomePage() {
       });
 
       if (response.ok) {
+        const data = await response.json();
+        console.log('Successfully joined room:', data);
+            //  ✅  HERE'S THE IMPORTANT PART:  Navigate to the room page
+            // window.location.href = `/room/${data.roomId}`;  //  Example using window.location
+
         // Store user info in localStorage for persistence
         localStorage.setItem('drawAndGuessUser', JSON.stringify({
           id: userId,
@@ -168,11 +173,11 @@ export default function HomePage() {
         router.push(`/game/${roomId}`);
       } else {
         const error = await response.json();
-        setUsernameError(error.message || "Failed to join room");
+        setUsernameError(error.message+"okkkk" || "Failed to join room AAAA");
       }
     } catch (error) {
       console.error("Error joining room:", error);
-      setUsernameError("Failed to connect to the game server");
+      setUsernameError("Failed to connect to the game server Aaa");
     } finally {
       setIsLoading(false);
     }
@@ -248,7 +253,7 @@ export default function HomePage() {
                           placeholder="Enter room ID"
                           value={roomId}
                           onChange={(e) => setRoomId(e.target.value)}
-                          className="w-full px-4 text-black py-3 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent"
+                          className="w-full px-4 text-black py-3 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-1 focus:ring-indigo-600 focus:border-transparent"
                         />
                         <button
                           onClick={joinRoom}
